@@ -21,6 +21,16 @@ class Simulator():
         self.stats = None
         self.addHostlistInit(hostinit)
 
+    def reset (self, hostinit):
+        self.hostlimit = len(hostinit)
+        self.scheduler.setEnvironment(self)
+        self.hostlist = []
+        self.containerlist = []
+        self.interval = 0
+        self.inactiveContainers = []
+        self.stats = None
+        self.addHostlistInit(hostinit)
+        
     def addHostInit(self, IPS, RAM, Disk, Bw, Latency, Powermodel):
         assert len(self.hostlist) < self.hostlimit
         host = Host(len(self.hostlist), IPS, RAM, Disk, Bw, Latency, Powermodel, self)
@@ -109,6 +119,7 @@ class Simulator():
 
     def allocateInit(self, decision):
         migrations = []
+        rewards = {}
         routerBwToEach = self.totalbw / (len(decision) + 1e-10)
         for (cid, hid) in decision:
             container = self.getContainerByID(cid)
@@ -119,10 +130,14 @@ class Simulator():
                 if container.getHostID() != hid:
                     migrations.append((cid, hid))
                 container.allocateAndExecute(hid, allocbw)
+                if container.getBaseIPS() == 0:
+                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
+                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*ten_scale 
+
 			# destroy pointer to this unallocated container as book-keeping is done by workload model
             else: 
                 self.containerlist[cid] = None
-        return migrations
+        return migrations, rewards
 
     def destroyCompletedContainers(self):
         destroyed = []
@@ -175,9 +190,13 @@ class Simulator():
             placementCondition = self.getPlacementPossible(cid, hid)
             if hid != self.containerlist[cid].hostid and placementCondition:
                 if container.hostid != -1:
-                    rewards[cid, container.hostid] = (container.createAt/self.interval)*container.ipsmodel.completedAfterMigration 
+                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
+                    rewards[cid, container.hostid] = (container.createAt/self.interval)*ten_scale
                 migrations.append((cid, hid))
                 container.allocateAndExecute(hid, allocbw)
+                if container.getBaseIPS() == 0:
+                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
+                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*ten_scale 
                 containerIDsAllocated.append(cid)
                 
             elif not placementCondition:
@@ -196,6 +215,7 @@ class Simulator():
             if container and i not in containerIDsAllocated:
                 container.execute(0)
                 if container.getBaseIPS() == 0:
-                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*container.ipsmodel.completedAfterMigration 
+                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
+                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*ten_scale 
 
         return migrations, rewards
