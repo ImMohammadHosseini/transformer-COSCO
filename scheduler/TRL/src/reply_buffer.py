@@ -7,11 +7,12 @@ from typing import Optional, List
 import numpy as np
 
 class PPOReplayBuffer ():
-    def __init__ (self, link_number):
-        #self.link_number = link_number
-        self.reset_final_memory()
+    def __init__ (self):
+        self.reset()
+    
+    def reset (self):
         self.reset_mid_memory()
-        
+        self.reset_final_memory()
     
     def reset_final_memory (self) :
         self.final_observation = [] 
@@ -32,10 +33,11 @@ class PPOReplayBuffer ():
         self.mid_val = []
         self.mid_steps = []
     
-    def save_mid_step (
+    def save_mid_memory (
         self, 
         observation: List[torch.Tensor],
         decision: List,
+        rewards,
         actions: List,
         probs: List,
         values: List, 
@@ -53,37 +55,65 @@ class PPOReplayBuffer ():
             
         if not isinstance(internalObservations, type(None)):
             self.mid_internalObservation += internalObservations
+        
+        self.save_final_memory(rewards)
 
     def save_final_memory (
         self,
         rewards:dict
     ):
-        for i in rewards:
+        re = dict(reversed(list(rewards.items())))
+        for i in re:
             condition = (np.array(self.mid_decision)[:,0] == i[0]) &  (np.array(self.mid_decision)[:,1] == i[1])
-            index = np.where(condition)[0][0]
+            #print(condition)
+            #print(re[i])
+            index = np.where(condition)[0][-1]
             self.final_observation.append(self.mid_observation.pop(index))
             self.final_decision.append(self.mid_decision.pop(index)) 
             self.final_action.append(self.mid_action.pop(index))
             self.final_prob.append(self.mid_prob.pop(index))
             self.final_val.append(self.mid_val.pop(index))
-            self.final_reward.append(rewards[i])
+            self.final_reward.append(re[i])
             
             try:
                 self.final_internalObservation.append(self.mid_internalObservation.pop(index))
                 self.final_steps.append(self.mid_steps.pop(index))
+            except: pass
         
-    def get_memory (self):
-        try: return torch.cat(self.normal_observation, 0), \
-                torch.cat(self.normal_action, 0), \
-                torch.cat(self.normal_prob, 0), \
-                torch.cat(self.normal_val, 0), \
-                torch.cat(self.normal_reward, 0), \
-                torch.cat(self.normal_done, 0), \
-                torch.cat(self.normal_steps, 0), \
-                torch.cat(self.normal_internalObservation, 0)
-        except: return torch.cat(self.normal_observation, 0), \
-                torch.cat(self.normal_action, 0), \
-                torch.cat(self.normal_prob, 0), \
-                torch.cat(self.normal_val, 0), \
-                torch.cat(self.normal_reward, 0), \
-                torch.cat(self.normal_done, 0)
+    def get_memory (
+        self, 
+        n_state: int,
+    ):
+        try: return np.array(self.final_observation[:n_state]), \
+                np.array(self.final_action[:n_state]), \
+                np.array(self.final_prob[:n_state]), \
+                np.array(self.final_val[:n_state]), \
+                np.array(self.final_reward[:n_state]), \
+                np.array(self.final_steps[:n_state]), \
+                np.array(self.final_internalObservation[:n_state])
+        except: return np.array(self.final_observation[:n_state]), \
+                np.array(self.final_action[:n_state]), \
+                np.array(self.final_prob[:n_state]), \
+                np.array(self.final_val[:n_state]), \
+                np.array(self.final_reward[:n_state])
+                
+    def erase(
+        self, 
+        n_state,
+    ):
+        try:
+            self.final_observation = self.final_observation[n_state:]
+            self.final_action = self.final_action[n_state:]
+            self.final_prob = self.final_prob[n_state:]
+            self.final_val = self.final_val[n_state:]
+            self.final_reward = self.final_reward[n_state:]
+            self.final_steps = self.final_steps[n_state:]
+            self.final_internalObservation = self.final_internalObservation[n_state:]
+        except: 
+            self.final_observation = self.final_observation[n_state:]
+            self.final_action = self.final_action[n_state:]
+            self.final_prob = self.final_prob[n_state:]
+            self.final_val = self.final_val[n_state:]
+            self.final_reward = self.final_reward[n_state:]
+        return len(self.final_action)
+        

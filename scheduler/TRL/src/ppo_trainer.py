@@ -16,7 +16,6 @@ class PPOTRainer ():
     def __init__(
         self,
         actor_model: torch.nn.Module,
-        env,
         ppo_epochs: int =5,
         gamma: float =.99,
         gae_lambda: float =.97,
@@ -30,13 +29,15 @@ class PPOTRainer ():
         self.actor_optimizer = Adam(self.actor_model.parameters(), lr=1e-7)
         self.critic_optimizer = Adam(self.critic_model.parameters(), lr= 1e-7)
         self.buffer = PPOReplayBuffer()
-        self.env = env
         self.ppo_epochs = ppo_epochs
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.cliprange = cliprange
 
     
+    def reset (self):
+        self.buffer.reset()
+        
     def save_mid_step (
         self, 
         observation: List[torch.Tensor],
@@ -59,9 +60,11 @@ class PPOTRainer ():
                     steps.pop(index)
                     internalObservations.pop(index)
                 except: pass'''
+        #print(torch.cat(observation, 0).size())
+        #print(actions)
         vals = self.critic_model(torch.cat(observation, 0)).squeeze().tolist()
         
-        print('valss', vals)
+        #print('valss', vals)
         self.buffer.save_mid_memory(observation, decision, rewards, actions, log_probs,
                                     vals)
     
@@ -146,7 +149,7 @@ class PPOTRainer ():
                 self.critic_optimizer.step()
 
 
-        return self.memory.erase(n_state)
+        return self.buffer.erase(n_state)
          
         
 
