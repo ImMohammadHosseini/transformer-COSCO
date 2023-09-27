@@ -2,10 +2,13 @@ import numpy as np
 
 class Workload():
     def __init__(self):
+        self.reset()
+
+    def reset(self):
         self.creation_id = 0
         self.createdContainers = []
         self.deployedContainers = []
-
+        
     def getUndeployedContainers(self):
         undeployed = []
         for i,deployed in enumerate(self.deployedContainers):

@@ -43,6 +43,9 @@ class BWGD2(Workload):
             if (ips_multiplier*df['CPU usage [MHZ]']).to_list()[10] < 3000 and (ips_multiplier*df['CPU usage [MHZ]']).to_list()[10] > 500:
                 self.possible_indices.append(i)			
 
+    def reset(self):
+        super().reset()
+        
     def generateNewContainers(self, interval):
         workloadlist = []
         for i in range(max(1,int(gauss(self.mean, self.sigma)))):
