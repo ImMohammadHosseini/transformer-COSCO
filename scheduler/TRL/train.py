@@ -3,60 +3,105 @@
 import torch
 import numpy as np
 import os
+import pickle
 from tqdm import tqdm
 
 from .src.ppo_trainer import PPOTRainer
 
-def ppo_train(workload, scheduler, train_step):
+def ppo_train(workload, scheduler, datacenter, train_step):
+    #TODO big amount of rewards check how to reduce them
     #env = scheduler.env
     trainer = PPOTRainer(scheduler.model, scheduler.env)
     batch_size = 64
+    episod_step = 100
     
-    best_reward = -1e4
-    reward_history=[]; avgresponsetime_history=[]; energytotalinterval_history=[]
-    n_steps = 0
     for i in tqdm(range(train_step)):
-        newcontainerinfos = workload.generateNewContainers(scheduler.env.interval) 
-        deployed, destroyed = scheduler.env.addContainers(newcontainerinfos) 
-        decisions, actions, log_probs, mainInfo, encoder_inputs, steps, decoder_inputs = \
-            scheduler.run_transformer()
-        filter_decisions = scheduler.filter_placement(decisions)
-        trainer.save_mid_step (encoder_inputs, decisions, filter_decisions, actions, 
-                               log_probs, steps, decoder_inputs)
+        workload.reset()
+        newcontainerinfos = workload.generateNewContainers(scheduler.env.interval) # New containers info
+        hostlist = datacenter.generateHosts()
+        scheduler.env.reset(hostlist)
+        deployed = scheduler.env.addContainersInit(newcontainerinfos) # Deploy new containers and get container IDs
+        decisions, filter_decision, rewards, actions, log_probs, mainInfo, encoder_inputs, \
+            steps, decoder_inputs = scheduler.run_transformer()
+        trainer.reset()
+        trainer.save_mid_step (encoder_inputs, decisions, filter_decision, rewards,
+                               actions, log_probs, steps, decoder_inputs)
+    
+        migrations, rewards = scheduler.env.allocateInit(filter_decision) # Schedule containers
+        workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) # Update workload allocated using creation IDs
+    
+        best_reward = -1e4
+        ep_reward = sum(rewards.values()); ep_avgresponsetime=0; ep_totalenergy=0; num_container=0
+        reward_history=[]; avgresponsetime_history=[]; energytotal_history=[]; num_container_history=[]
+        n_steps = len(rewards)
         
-        migrations, rewards = scheduler.env.simulationStep(filter_decisions)
-        step_reward = sum(rewards.values())
-        reward_history.append(step_reward)
-        avgresponsetime = np.average([c.totalExecTime + c.totalMigrationTime for c in destroyed]) if len(destroyed) > 0 else 0
-        if avgresponsetime != 0: avgresponsetime_history.append(avgresponsetime)
-        energytotalinterval = np.sum([host.getPower()*scheduler.env.intervaltime for host in scheduler.env.hostlist])
-        energytotalinterval_history.append(energytotalinterval)
-        trainer.save_final_step(rewards)
-        workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) 
-        n_steps += len(rewards)
-        if n_steps >= batch_size:
-            n_steps = trainer.train(batch_size)
+        for ep in range(episod_step):
+            newcontainerinfos = workload.generateNewContainers(scheduler.env.interval) 
+            deployed, destroyed = scheduler.env.addContainers(newcontainerinfos)
+            decisions, filter_decision, rewards, actions, log_probs, mainInfo, \
+                encoder_inputs, steps, decoder_inputs = scheduler.run_transformer()
+            n_steps += len(rewards)
+            ep_reward += sum(rewards.values())
+            #filter_decisions = scheduler.filter_placement(decisions)
+            trainer.save_mid_step (encoder_inputs, decisions, filter_decision, 
+                                   rewards, actions, log_probs, steps, decoder_inputs)
+        
+            #print(filter_decision)
+            #print(decisions)
+        
+            migrations, rewards = scheduler.env.simulationStep(filter_decision)
+            ep_reward += sum(rewards.values())
+            n_steps += len(rewards)
+            ep_avgresponsetime += np.average([c.totalExecTime + c.totalMigrationTime for c in destroyed]) if len(destroyed) > 0 else 0
+            ep_totalenergy += np.sum([host.getPower()*scheduler.env.intervaltime for host in scheduler.env.hostlist])
             
-        print('interval', scheduler.env.interval, 'step_reward %.3f' % step_reward, 
-              'avgresponsetime %.2f' % avgresponsetime, 'energytotalinterval %.2f' % energytotalinterval, 
-              'reward_history_50avg %.3f'% np.mean(reward_history[-50:]),
-              'responsetime_history_50avg %.3f'% np.mean(avgresponsetime_history[-50:]), 
-              'energytotal_history_50avg %.3f'% np.mean(energytotalinterval_history[-50:]))
+            workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) 
+            
+            trainer.save_final_step(rewards)
+            if n_steps >= batch_size:
+                n_steps = trainer.train_minibatch(batch_size)
+        
+        num_container = workload.self.creation_id - scheduler.env.getNumActiveContainers()
+        num_container_history.append(num_container)
+        reward_history.append(ep_reward)
+        ep_avgresponsetime/=episod_step
+        avgresponsetime_history.append(ep_avgresponsetime/episod_step)
+        energytotal_history.append(ep_totalenergy)
+        
+        avg_reward = np.mean(reward_history[-50:])
+        if avg_reward > best_reward:
+                best_reward  = avg_reward
+                save_model(scheduler.save_path, trainer.actor_model, trainer.actor_optimizer)
+                save_model(scheduler.save_path, trainer.critic_model, trainer.critic_optimizer)
+        
+        print('episod_reward %.3f' % ep_reward, 'avg_reward %.3f' % avg_reward,
+              'episod_container', num_container, 'avg_container %.3f' % np.mean(num_container_history[-50:]),
+              'episod_avgresponsetime %.3f'%ep_avgresponsetime, 
+              '50episod_avgresponsetime %.3f'% np.mean(avgresponsetime_history[-50:]), 
+              'episod_totalenergy %.3f'%ep_totalenergy)
+        
+        if i % 100 == 0:
+            results_dict = {'reward': reward_history, 'avgresponsetime': avgresponsetime_history,
+                            'energytotal':energytotal_history, 'num_container':num_container_history}
+            with open('train_results/results.pickle', 'wb') as file:
+                pickle.dump(results_dict, file)
     
 
 
 def save_model(save_path, model, optimizer):
-	file_path = save_path + "/" + model.name + "_" + "TRL" + ".ckpt"
-	torch.save({
+    if not os.path.exists(save_path): 
+        os.makedirs(save_path)
+    file_path = save_path + "/" + model.name + "_" + "TRL" + ".ckpt"
+    torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()}, file_path)
     
 def load_model(save_path, model):
-	file_path = save_path + "/" + model.name + "_" + "TRL" + ".ckpt"
-	if os.path.exists(file_path):
-		print("Loading pre-trained model: ")
-		checkpoint = torch.load(file_path)
-		model.load_state_dict(checkpoint['model_state_dict'])
-	else:
-		print("Creating new model: "+model.name)
-	return model
+    file_path = save_path + "/" + model.name + "_" + "TRL" + ".ckpt"
+    if os.path.exists(file_path): 
+        print("Loading pre-trained model: ")
+        checkpoint = torch.load(file_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        print("Creating new model: "+model.name)
+    return model
