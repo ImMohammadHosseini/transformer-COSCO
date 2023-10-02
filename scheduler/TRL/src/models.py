@@ -185,7 +185,7 @@ class EncoderScheduler (nn.Module):
         output_dim: int,
         prob_len: int,
         host_num: int,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device = torch.device("cpu"),#"cuda" if torch.cuda.is_available() else "cpu"),
         name='EncoderScheduler',
     ):
         super().__init__()
@@ -239,7 +239,7 @@ class EncoderScheduler (nn.Module):
         filter_decision = np.zeros((0,2), dtype=int)
         rewards = {}
         for s in range(0, self.decoder_max_length-1):
-            next_generate = self.forward(encoder_in)
+            next_generate = self.forward(encoder_in)#.cpu()
             next_dist = Categorical(next_generate)
             next_decision = next_dist.sample()
             next_prob = next_dist.log_prob(
@@ -270,8 +270,9 @@ class EncoderScheduler (nn.Module):
                         host = env.getHostByID(host_dec)
                         ips = int(host.getApparentIPS() +
                                   env.getContainerByID(cont_dec).getApparentIPS())
-                        encoder_in[:, -(self.host_num-host_dec+1)
-                                   ] = 100 * (ips / host.ipsCap)
+                        encoder_in[:, -(self.host_num-host_dec+1)] = torch.tensor(
+                            [host.ipsCap/50000, ips/host.ipsCap, host.latency])
+
                 else: rewards[cont_dec, host_dec] = 0
             else: rewards[cont_dec, host_dec] = 0
 
@@ -281,13 +282,12 @@ class EncoderScheduler (nn.Module):
         self,
         encoder_in: torch.tensor,
     ):
-
         encoder_embedding = self.en_embed(
-            encoder_in) * math.sqrt(self.output_dim)
+            encoder_in.to(self.device)) * math.sqrt(self.output_dim)
         self.encoder = self.encoder.to(self.device)
-
         encod = self.encoder(self.en_position_encode(encoder_embedding))
         flat = self.flatten(encod)
+
         return self.softmax(self.outer(flat))
 
 
