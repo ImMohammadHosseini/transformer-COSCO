@@ -26,8 +26,8 @@ class PPOTRainer ():
                                            self.actor_model.input_dim, 
                                            self.actor_model.device)
         #TODO critic model load part
-        self.actor_optimizer = Adam(self.actor_model.parameters(), lr=1e-7)
-        self.critic_optimizer = Adam(self.critic_model.parameters(), lr= 1e-7)
+        self.actor_optimizer = Adam(self.actor_model.parameters(), lr=1e-5)
+        self.critic_optimizer = Adam(self.critic_model.parameters(), lr= 1e-5)
         self.buffer = PPOReplayBuffer()
         self.ppo_epochs = ppo_epochs
         self.gamma = gamma
@@ -132,19 +132,18 @@ class PPOTRainer ():
 
                 weighted_clipped_probs = torch.clamp(prob_ratio, 1-self.cliprange,
                             1+self.cliprange)*batchAdvs
+
                 actor_loss = -torch.min(weighted_probs, weighted_clipped_probs).mean()
                 returns = batchAdvs + batchVals
-                
                 critic_loss = (returns-newVal)**2
-                
                 critic_loss = torch.mean(critic_loss)
 
                 total_loss = actor_loss + 0.5*critic_loss
                 #total_loss.requires_grad=True
-                
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
                 total_loss.backward()
+
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
 

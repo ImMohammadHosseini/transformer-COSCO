@@ -9,13 +9,16 @@ from tqdm import tqdm
 from .src.ppo_trainer import PPOTRainer
 
 def ppo_train(workload, scheduler, datacenter, train_step):
-    #TODO big amount of rewards check how to reduce them
     #env = scheduler.env
-    trainer = PPOTRainer(scheduler.model, scheduler.env)
-    batch_size = 64
+    trainer = PPOTRainer(scheduler.model)
+    batch_size = 32
     episod_step = 100
     
+    reward_history=[]; avgresponsetime_history=[]; energytotal_history=[]; num_container_history=[]
     for i in tqdm(range(train_step)):
+        #TODO change reset repluy buffer
+        #TODO CHANGE INPUT
+        
         workload.reset()
         newcontainerinfos = workload.generateNewContainers(scheduler.env.interval) # New containers info
         hostlist = datacenter.generateHosts()
@@ -31,11 +34,11 @@ def ppo_train(workload, scheduler, datacenter, train_step):
         workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) # Update workload allocated using creation IDs
     
         best_reward = -1e4
-        ep_reward = sum(rewards.values()); ep_avgresponsetime=0; ep_totalenergy=0; num_container=0
-        reward_history=[]; avgresponsetime_history=[]; energytotal_history=[]; num_container_history=[]
+        ep_reward = sum(rewards.values()); ep_avgresponsetime=[]; ep_totalenergy=0; num_container=0
         n_steps = len(rewards)
         
         for ep in range(episod_step):
+            #print(scheduler.env.getNumActiveContainers())
             newcontainerinfos = workload.generateNewContainers(scheduler.env.interval) 
             deployed, destroyed = scheduler.env.addContainers(newcontainerinfos)
             decisions, filter_decision, rewards, actions, log_probs, mainInfo, \
@@ -52,7 +55,7 @@ def ppo_train(workload, scheduler, datacenter, train_step):
             migrations, rewards = scheduler.env.simulationStep(filter_decision)
             ep_reward += sum(rewards.values())
             n_steps += len(rewards)
-            ep_avgresponsetime += np.average([c.totalExecTime + c.totalMigrationTime for c in destroyed]) if len(destroyed) > 0 else 0
+            ep_avgresponsetime += [c.totalExecTime + c.totalMigrationTime for c in destroyed] if len(destroyed) > 0 else []
             ep_totalenergy += np.sum([host.getPower()*scheduler.env.intervaltime for host in scheduler.env.hostlist])
             
             workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) 
@@ -61,11 +64,11 @@ def ppo_train(workload, scheduler, datacenter, train_step):
             if n_steps >= batch_size:
                 n_steps = trainer.train_minibatch(batch_size)
         
-        num_container = workload.self.creation_id - scheduler.env.getNumActiveContainers()
+        num_container = workload.creation_id - scheduler.env.getNumActiveContainers()
         num_container_history.append(num_container)
         reward_history.append(ep_reward)
-        ep_avgresponsetime/=episod_step
-        avgresponsetime_history.append(ep_avgresponsetime/episod_step)
+        ep_avgresponsetime = np.average(ep_avgresponsetime)
+        avgresponsetime_history.append(ep_avgresponsetime)
         energytotal_history.append(ep_totalenergy)
         
         avg_reward = np.mean(reward_history[-50:])
@@ -83,7 +86,7 @@ def ppo_train(workload, scheduler, datacenter, train_step):
         if i % 100 == 0:
             results_dict = {'reward': reward_history, 'avgresponsetime': avgresponsetime_history,
                             'energytotal':energytotal_history, 'num_container':num_container_history}
-            with open('train_results/results.pickle', 'wb') as file:
+            with open('scheduler/TRL/train_results/results.pickle', 'wb') as file:
                 pickle.dump(results_dict, file)
     
 
