@@ -18,6 +18,7 @@ class Container():
         self.createAt = creationInterval
         self.startAt = self.env.interval
         self.totalExecTime = 0
+        self.execTimeAfterMigration = 0
         self.totalMigrationTime = 0
         self.active = True
         self.destroyAt = -1
@@ -64,8 +65,19 @@ class Container():
             lastMigrationTime += abs(self.env.hostlist[self.hostid].latency - self.env.hostlist[hostID].latency)
         self.hostid = hostID
         self.ipsmodel.completedAfterMigration = 0
+        self.execTimeAfterMigration = 0
         return lastMigrationTime
     
+    def semi_execute (self):
+        #if self.hostid == -1: return
+        assert self.hostid != -1
+        execTime = self.env.intervaltime
+        apparentIPS = self.getApparentIPS()
+        requiredExecTime = (self.ipsmodel.totalInstructions - self.ipsmodel.completedInstructions) / apparentIPS if apparentIPS else 0
+        semiTotalExecTime = min(execTime, requiredExecTime)
+        semiCompletedInstructions = apparentIPS * min(execTime, requiredExecTime)
+        return semiTotalExecTime, semiCompletedInstructions
+        
     def execute(self, lastMigrationTime):
 		# Migration time is the time to migrate to new host
 		# Thus, execution of task takes place for interval
@@ -77,6 +89,7 @@ class Container():
         apparentIPS = self.getApparentIPS()
         requiredExecTime = (self.ipsmodel.totalInstructions - self.ipsmodel.completedInstructions) / apparentIPS if apparentIPS else 0
         self.totalExecTime += min(execTime, requiredExecTime)
+        self.execTimeAfterMigration += min(execTime, requiredExecTime)
         self.ipsmodel.completedInstructions += apparentIPS * min(execTime, requiredExecTime)
         self.ipsmodel.completedAfterMigration += apparentIPS * min(execTime, requiredExecTime)
         

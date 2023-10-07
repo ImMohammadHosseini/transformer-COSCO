@@ -11,6 +11,11 @@ class IPSMBitbrain(IPSM):
         self.completedAfterMigration = 0
         self.totalInstructions = 0
 
+    def getTotalInstructions(self):
+        if self.totalInstructions == 0:
+            for ips in self.ips_list[:self.duration]: self.totalInstructions += ips * self.container.env.intervaltime
+        return self.totalInstructions
+    
     def getIPS(self):
         if self.totalInstructions == 0:
             for ips in self.ips_list[:self.duration]: self.totalInstructions += ips * self.container.env.intervaltime
