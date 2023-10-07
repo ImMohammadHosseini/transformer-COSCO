@@ -260,19 +260,21 @@ class EncoderScheduler (nn.Module):
             #if prev_alloc[cont_dec] != new_host: decision.append((cid, new_host))
 
             if env.containerlist[cont_dec] and cont_dec not in filter_decision[:,0]:
-                if env.getContainerByID(cont_dec).getHostID() != host_dec and \
-                    env.getPlacementPossible(cont_dec, host_dec):
+                if env.getContainerByID(cont_dec).getHostID() != host_dec and env.getPlacementPossible(cont_dec, host_dec):
                     filter_decision = np.append(filter_decision,[[cont_dec, host_dec]], 0)
-                
                     with torch.no_grad():
                         encoder_in[:,cont_dec] = pad#torch.cat([pad, torch.cat([encoder_in[:, 0:cont_dec],
                                                      #encoder_in[:, cont_dec+1:]], 1)], 1)
                         host = env.getHostByID(host_dec)
-                        ips = int(host.getApparentIPS() +
-                                  env.getContainerByID(cont_dec).getApparentIPS())
+                        container = env.getContainerByID(cont_dec)
+                        baseIps = host.getBaseIPS()+container.getBaseIPS()
                         encoder_in[:, -(self.host_num-host_dec+1)] = torch.tensor(
-                            [host.ipsCap/50000, ips/host.ipsCap, host.latency])
-
+                            [host.ipsCap/16111, (host.ipsCap-baseIps)/16111, host.latency])
+                        if container.getHostID() != -1:
+                            old_hid = container.getHostID()
+                            old_host = env.getHostByID(old_hid)
+                            encoder_in[:, -(self.host_num-old_hid+1)] = torch.tensor(
+                                [host.ipsCap/16111, (host.ipsCap+baseIps)/16111, host.latency])
                 else: rewards[cont_dec, host_dec] = 0
             else: rewards[cont_dec, host_dec] = 0
 
