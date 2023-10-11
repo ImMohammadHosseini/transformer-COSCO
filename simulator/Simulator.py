@@ -130,9 +130,12 @@ class Simulator():
                 if container.getHostID() != hid:
                     migrations.append((cid, hid))
                 container.allocateAndExecute(hid, allocbw)
-                if container.getBaseIPS() == 0:
-                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
-                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*ten_scale 
+                
+                predictExecTime = (container.execTimeAfterMigration*container.ipsmodel.getTotalInstructions())/(container.ipsmodel.completedAfterMigration)
+                rewards[cid, hid] = 1000*(1/predictExecTime)
+                #if container.getBaseIPS() == 0:
+                #    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.getTotalInstructions())
+                #    rewards[container.id, container.hostid] = ((container.createAt+1)/(self.interval+1))*ten_scale 
 
 			# destroy pointer to this unallocated container as book-keeping is done by workload model
             else: 
@@ -189,33 +192,55 @@ class Simulator():
             allocbw = min(targetHost.bwCap.downlink / migrateToNum, currentHost.bwCap.uplink / migrateFromNum, routerBwToEach)
             placementCondition = self.getPlacementPossible(cid, hid)
             if hid != self.containerlist[cid].hostid and placementCondition:
+                #if container.hostid != -1:
+                #    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.getTotalInstructions())
+                #    rewards[cid, container.hostid] = ((container.createAt+1)/(self.interval+1))*ten_scale
+                containerRemainInstruction = container.ipsmodel.getTotalInstructions()-container.ipsmodel.completedInstructions
+                firstAllocation = True
                 if container.hostid != -1:
-                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
-                    rewards[cid, container.hostid] = (container.createAt/self.interval)*ten_scale
+                    firstAllocation = False
+                    oldExecTime, oldCompletedInstructions = container.semi_execute()
+                    predictOldExecTime = (oldExecTime*containerRemainInstruction)/oldCompletedInstructions if oldCompletedInstructions else 0
+                
                 migrations.append((cid, hid))
                 container.allocateAndExecute(hid, allocbw)
-                if container.getBaseIPS() == 0:
-                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
-                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*ten_scale 
+                
+                completedAfterMigration = container.ipsmodel.completedAfterMigration
+                predictExecTime = (container.execTimeAfterMigration*containerRemainInstruction)/completedAfterMigration if completedAfterMigration else 0
+                if predictExecTime == 0: rewards[cid, hid] = 0
+                elif not firstAllocation and predictOldExecTime != 0:
+                    #print('reward1', 1000*((1/predictExecTime) - (1/predictOldExecTime)))
+                    rewards[cid, hid] = 1000*((1/predictExecTime) - (1/predictOldExecTime))
+                else: 
+                    #print('reward2', 1000*(1/predictExecTime))
+                    rewards[cid, hid] = 1000*(1/predictExecTime)
+                
+                #if container.getBaseIPS() == 0:
+                #    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.getTotalInstructions())
+                #    rewards[container.id, container.hostid] = ((container.createAt+1)/(self.interval+1))*ten_scale 
                 containerIDsAllocated.append(cid)
                 
             elif not placementCondition:
                 rewards[cid, hid] = 0
                 
 		# destroy pointer to unallocated containers as book-keeping is done by workload model
-        '''for (cid, hid) in decision:
+        for (cid, hid) in decision:
             if self.containerlist[cid].hostid == -1: 
-                print('dddddddddddddddd')
-                self.containerlist[cid] = None'''
+                self.containerlist[cid] = None
         
-        for i,container in enumerate(self.containerlist):
-            if container and self.containerlist[i].hostid == -1: self.containerlist[i] = None
+        '''for i,container in enumerate(self.containerlist):
+           
+            if container and self.containerlist[i].hostid == -1:
+                print('none in exe', i)
+                print('getTotalInstructions',container.ipsmodel.getTotalInstructions())
+                print(container.ipsmodel.completedInstructions)
+                self.containerlist[i] = None'''
             
         for i,container in enumerate(self.containerlist):
             if container and i not in containerIDsAllocated:
                 container.execute(0)
-                if container.getBaseIPS() == 0:
-                    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.totalInstructions)
-                    rewards[container.id, container.hostid] = (container.createAt/self.interval)*ten_scale 
+                #if container.getBaseIPS() == 0:
+                #    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.getTotalInstructions())
+                #    rewards[container.id, container.hostid] = ((container.createAt+1)/(self.interval+1))*ten_scale 
 
         return migrations, rewards
