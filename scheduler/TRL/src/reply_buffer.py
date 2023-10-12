@@ -49,7 +49,6 @@ class PPOReplayBuffer ():
         self.mid_action += actions
         self.mid_prob += probs
         self.mid_val += values
-        
         if not isinstance(steps, type(None)):
             self.mid_steps += steps
             
@@ -62,23 +61,22 @@ class PPOReplayBuffer ():
         self,
         rewards:dict
     ):
-        re = dict(reversed(list(rewards.items())))
-        for i in re:
-            condition = (np.array(self.mid_decision)[:,0] == i[0]) &  (np.array(self.mid_decision)[:,1] == i[1])
-            #print(condition)
-            #print(re[i])
-            index = np.where(condition)[0][-1]
-            self.final_observation.append(self.mid_observation.pop(index))
-            self.final_decision.append(self.mid_decision.pop(index)) 
-            self.final_action.append(self.mid_action.pop(index))
-            self.final_prob.append(self.mid_prob.pop(index))
-            self.final_val.append(self.mid_val.pop(index))
-            self.final_reward.append(re[i])
+        
+        for i in rewards:
+            for reward in rewards[i]:
+                condition = (np.array(self.mid_decision)[:,0] == i[0]) &  (np.array(self.mid_decision)[:,1] == i[1])
+                index = np.where(condition)[0][-1]
+                self.final_observation.append(self.mid_observation.pop(index))
+                self.final_decision.append(self.mid_decision.pop(index)) 
+                self.final_action.append(self.mid_action.pop(index))
+                self.final_prob.append(self.mid_prob.pop(index))
+                self.final_val.append(self.mid_val.pop(index))
+                self.final_reward.append(reward)
             
-            try:
-                self.final_internalObservation.append(self.mid_internalObservation.pop(index))
-                self.final_steps.append(self.mid_steps.pop(index))
-            except: pass
+                try:
+                    self.final_internalObservation.append(self.mid_internalObservation.pop(index))
+                    self.final_steps.append(self.mid_steps.pop(index))
+                except: pass
         
     def get_memory (
         self, 
