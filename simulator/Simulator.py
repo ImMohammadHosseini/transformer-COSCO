@@ -131,8 +131,8 @@ class Simulator():
                     migrations.append((cid, hid))
                 container.allocateAndExecute(hid, allocbw)
                 
-                predictExecTime = (container.execTimeAfterMigration*container.ipsmodel.getTotalInstructions())/(container.ipsmodel.completedAfterMigration)
-                rewards[cid, hid] = 1000*(1/predictExecTime)
+                predictExecTime = container.totalExecTime+container.totalMigrationTime+(container.execTimeAfterMigration*container.ipsmodel.getTotalInstructions())/(container.ipsmodel.completedAfterMigration)
+                rewards[cid, hid] = [1e4*(1/predictExecTime)*((container.createAt+1)/(self.interval+1))]
                 #if container.getBaseIPS() == 0:
                 #    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.getTotalInstructions())
                 #    rewards[container.id, container.hostid] = ((container.createAt+1)/(self.interval+1))*ten_scale 
@@ -200,20 +200,22 @@ class Simulator():
                 if container.hostid != -1:
                     firstAllocation = False
                     oldExecTime, oldCompletedInstructions = container.semi_execute()
-                    predictOldExecTime = (oldExecTime*containerRemainInstruction)/oldCompletedInstructions if oldCompletedInstructions else 0
-                
+                    predictOldExecTime = container.totalExecTime+container.totalMigrationTime+((oldExecTime*containerRemainInstruction)/oldCompletedInstructions if oldCompletedInstructions else 0)
+                    predictOldExecTime = predictOldExecTime if predictOldExecTime > 1e-1 else 0
                 migrations.append((cid, hid))
                 container.allocateAndExecute(hid, allocbw)
                 
                 completedAfterMigration = container.ipsmodel.completedAfterMigration
-                predictExecTime = (container.execTimeAfterMigration*containerRemainInstruction)/completedAfterMigration if completedAfterMigration else 0
-                if predictExecTime == 0: rewards[cid, hid] = 0
+                predictExecTime = container.totalExecTime+container.totalMigrationTime+((container.execTimeAfterMigration*containerRemainInstruction)/completedAfterMigration if completedAfterMigration else 0)
+                predictExecTime = predictExecTime if predictExecTime > 1e-1 else 0
+                if predictExecTime == 0: rewards[cid, hid] = [0]
                 elif not firstAllocation and predictOldExecTime != 0:
                     #print('reward1', 1000*((1/predictExecTime) - (1/predictOldExecTime)))
-                    rewards[cid, hid] = 1000*((1/predictExecTime) - (1/predictOldExecTime))
+                    rewards[cid, hid] = [1e4*((1/predictExecTime) - (1/predictOldExecTime))*((container.createAt+1)/(self.interval+1))]
+                    #print('22', rewards[cid, hid])
                 else: 
                     #print('reward2', 1000*(1/predictExecTime))
-                    rewards[cid, hid] = 1000*(1/predictExecTime)
+                    rewards[cid, hid] = [1e4*(1/predictExecTime)*((container.createAt+1)/(self.interval+1))]
                 
                 #if container.getBaseIPS() == 0:
                 #    ten_scale = 10*(container.ipsmodel.completedAfterMigration / container.ipsmodel.getTotalInstructions())
@@ -221,20 +223,20 @@ class Simulator():
                 containerIDsAllocated.append(cid)
                 
             elif not placementCondition:
-                rewards[cid, hid] = 0
+                rewards[cid, hid] = [0]
                 
 		# destroy pointer to unallocated containers as book-keeping is done by workload model
-        for (cid, hid) in decision:
+        '''for (cid, hid) in decision:
             if self.containerlist[cid].hostid == -1: 
-                self.containerlist[cid] = None
+                self.containerlist[cid] = None'''
         
-        '''for i,container in enumerate(self.containerlist):
+        for i,container in enumerate(self.containerlist):
            
             if container and self.containerlist[i].hostid == -1:
-                print('none in exe', i)
-                print('getTotalInstructions',container.ipsmodel.getTotalInstructions())
-                print(container.ipsmodel.completedInstructions)
-                self.containerlist[i] = None'''
+                #print('none in exe', i)
+                #print('getTotalInstructions',container.ipsmodel.getTotalInstructions())
+                #print(container.ipsmodel.completedInstructions)
+                self.containerlist[i] = None
             
         for i,container in enumerate(self.containerlist):
             if container and i not in containerIDsAllocated:
