@@ -7,6 +7,7 @@ import pickle
 import shutil
 import sqlite3
 import platform
+import numpy as np
 from time import time
 from subprocess import call
 from os import system, rename
@@ -71,7 +72,7 @@ opts, args = parser.parse_args()
 # Global constants
 NUM_SIM_STEPS = 100
 HOSTS = 10#10 * 5 if opts.env == '' else 10
-CONTAINERS = int(2*HOSTS)
+#CONTAINERS = 10#int(2*HOSTS)#
 TOTAL_POWER = 1000
 ROUTER_BW = 10000
 INTERVAL_TIME = 300 # seconds
@@ -82,15 +83,35 @@ DB_PORT = 0
 HOSTS_IP = []
 logFile = 'COSCO.log'
 
-TRL_TRAINING = True #this boolian is used just for transformer RL training process 
+TRL_TRAINING = False #this boolian is used just for transformer RL training process 
 START_DATA_POINT = 1 if TRL_TRAINING else 250
 END_DATA_POINT = 250 if TRL_TRAINING else 500
-TRL_TRAINING_STEPS = 5000
+TRL_TRAINING_STEPS = 10000
 
+schedulers = ['GOBIScheduler_10', 'GAScheduler_10',]
+'''
+              'PONDScheduler_10', 'PONDScheduler_20', 
+              'LRMMTRScheduler_10', 'LRMMTRScheduler_20',
+              'MADMCRScheduler_10', 'MADMCRScheduler_20', 
+              'TRLScheduler_10', 'TRLScheduler_20']'''# 'DRLScheduler_10',  'DQLScheduler_10',
+
+result_path = 'final_results/'
 if len(sys.argv) > 1:
 	with open(logFile, 'w'): os.utime(logFile, None)
-
-def initalizeEnvironment(environment, logger):
+    
+performance_parameter={'responsetime':[], 'migrationtime':[], 'slaviolations':0,
+                       'waittime':[], 'energy':[], 'num_container':0}
+all_p={}
+def saveMetrics(env, destroyed):
+    performance_parameter['num_container'] += len(destroyed)
+	#metrics['nummigrations'] = len(migrations)
+    performance_parameter['energy'] = [host.getPower()*env.intervaltime for host in env.hostlist]
+    performance_parameter['responsetime'] += [c.totalExecTime + c.totalMigrationTime for c in destroyed]
+    performance_parameter['migrationtime'] += [c.totalMigrationTime for c in destroyed]
+    performance_parameter['slaviolations'] += len(np.where([c.destroyAt > c.sla for c in destroyed])[0])
+    performance_parameter['waittime'] += [c.startAt - c.createAt for c in destroyed]
+		
+def initalizeEnvironment(environment, logger, sch):
     if environment != '':
    		# Initialize the db
    		db = Database(DB_NAME, DB_HOST, DB_PORT)
@@ -110,15 +131,15 @@ def initalizeEnvironment(environment, logger):
    		workload = BWGD2(NEW_CONTAINERS, 1.5, START_DATA_POINT, END_DATA_POINT)
    	
    	# Initialize scheduler
-    ''' Can be LRMMTR, RF, RL, RM, Random, RLRMMTR, TMCR, TMMR, TMMTR, GA, GOBI (arg = 'energy_latency_'+str(HOSTS)) '''
-    scheduler = TRLScheduler('energy_latency_'+str(HOSTS)) # GOBIScheduler('energy_latency_'+str(HOSTS))
+    ''' Can be LRMMTR, RF, RL, RM, Random, RLRMMTR, TMCR, TMMR, TMMTR, GA, GOBI, TRLScheduler(arg = 'energy_latency_'+str(HOSTS)) '''
+    scheduler = eval(sch.split('_')[0])('energy_latency_'+str(HOSTS)) 
    
    	# Initialize Environment   
     hostlist = datacenter.generateHosts()
     if environment != '':
-   		env = Framework(scheduler, CONTAINERS, INTERVAL_TIME, hostlist, db, environment, logger)
+   		env = Framework(scheduler, int(sch.split('_')[1]), INTERVAL_TIME, hostlist, db, environment, logger)
     else:
-   		env = Simulator(TOTAL_POWER, ROUTER_BW, scheduler, CONTAINERS, INTERVAL_TIME, hostlist)
+   		env = Simulator(TOTAL_POWER, ROUTER_BW, scheduler, int(sch.split('_')[1]), INTERVAL_TIME, hostlist)
    	
    	# Initialize stats
     stats = Stats(env, workload, datacenter, scheduler)
@@ -138,36 +159,25 @@ def initalizeEnvironment(environment, logger):
     print("Schedule:", env.getActiveContainerList())
     printDecisionAndMigrations(decision, migrations)
    
-    stats.saveStats(deployed, migrations, [], deployed, decision, schedulingTime)
+    #stats.saveStats(deployed, migrations, [], deployed, decision, schedulingTime)
     
     return datacenter, workload, scheduler, env, stats
 
 def stepSimulation(workload, scheduler, env, stats):
     newcontainerinfos = workload.generateNewContainers(env.interval) # New containers info
-    #print('2')
-
     if opts.env != '': print(newcontainerinfos)
-    #print('3')
-
     deployed, destroyed = env.addContainers(newcontainerinfos) # Deploy new containers and get container IDs
-    #print('4')
-
+    #performance_parameter['responsetime'] += [c.totalExecTime + c.totalMigrationTime for c in destroyed] if len(destroyed) > 0 else []
+    #performance_parameter['num_container'] += len(destroyed)
     start = time()
-    #print('5')
-
     selected = scheduler.selection() # Select container IDs for migration
-    #print('6')
-
     decision = scheduler.filter_placement(scheduler.placement(selected+deployed)) # Decide placement for selected container ids
-    #print('7')
-
     schedulingTime = time() - start
-    #print('8')
-
     migrations, _ = env.simulationStep(decision) # Schedule containers
-    #print('9')
+    #performance_parameter['energytotal'] += np.sum([host.getPower()*env.intervaltime for host in env.hostlist])
 
     workload.updateDeployedContainers(env.getCreationIDs(migrations, deployed)) # Update workload deployed using creation IDs
+    saveMetrics(env, destroyed)
     print("Deployed containers' creation IDs:", env.getCreationIDs(migrations, deployed))
     print("Deployed:", len(env.getCreationIDs(migrations, deployed)), "of", len(newcontainerinfos), [i[0] for i in newcontainerinfos])
     print("Destroyed:", len(destroyed), "of", env.getNumActiveContainers())
@@ -176,7 +186,7 @@ def stepSimulation(workload, scheduler, env, stats):
     print("Host allocation:", [(c.getHostID() if c else -1)for c in env.containerlist])
     printDecisionAndMigrations(decision, migrations)
 
-    stats.saveStats(deployed, migrations, destroyed, selected, decision, schedulingTime)
+    #stats.saveStats(deployed, migrations, destroyed, selected, decision, schedulingTime)
 
 def saveStats(stats, datacenter, workload, env, end=True):
     dirname = "logs/" + datacenter.__class__.__name__
@@ -199,7 +209,6 @@ def saveStats(stats, datacenter, workload, env, end=True):
         stats.env, stats.workload, stats.datacenter, stats.scheduler, stats.simulated_scheduler = None, None, None, None, None
         print(dirname + '/' + dirname.split('/')[1] +'.pk')
         with open(dirname + '/' + dirname.split('/')[1] +'.pk', 'wb') as handle:
-            print(dirname+'pkkkkkkkkkkkkkkkkkkkk')
 
             pickle.dump(stats, handle)
         stats.env, stats.workload, stats.datacenter, stats.scheduler, stats.simulated_scheduler = saved_env, saved_workload, saved_datacenter, saved_scheduler, saved_sim_scheduler
@@ -217,53 +226,67 @@ def saveStats(stats, datacenter, workload, env, end=True):
         pickle.dump(stats, handle)
 
 if __name__ == '__main__':
-	env, mode = opts.env, int(opts.mode)
+    for sch in schedulers:
+        for i in range(3):
+            
+            env, mode = opts.env, int(opts.mode)
 
-	if env != '':
-		# Convert all agent files to unix format
-		unixify(['framework/agent/', 'framework/agent/scripts/'])
+            if env != '':
+                # Convert all agent files to unix format
+                unixify(['framework/agent/', 'framework/agent/scripts/'])
 
-		# Start InfluxDB service
-		print(color.HEADER+'InfluxDB service runs as a separate front-end window. Please minimize this window.'+color.ENDC)
-		if 'Windows' in platform.system():
-			os.startfile('C:/Program Files/InfluxDB/influxdb-1.8.3-1/influxd.exe')
+            		# Start InfluxDB service
+                print(color.HEADER+'InfluxDB service runs as a separate front-end window. Please minimize this window.'+color.ENDC)
+                if 'Windows' in platform.system():
+                    os.startfile('C:/Program Files/InfluxDB/influxdb-1.8.3-1/influxd.exe')
 
-		configFile = 'framework/config/' + opts.env + '_config.json'
-	    
-		logger.basicConfig(filename=logFile, level=logger.DEBUG,
-	                        format='%(asctime)s - %(levelname)s - %(message)s')
-		logger.debug("Creating enviornment in :{}".format(env))
-		cfg = {}
-		with open(configFile, "r") as f:
-			cfg = json.load(f)
-		DB_HOST = cfg['database']['ip']
-		DB_PORT = cfg['database']['port']
-		DB_NAME = 'COSCO'
+                configFile = 'framework/config/' + opts.env + '_config.json'
 
-		if env == 'Vagrant':
-			print("Setting up VirtualBox environment using Vagrant")
-			HOSTS_IP = setupVagrantEnvironment(configFile, mode)
-			print(HOSTS_IP)
-		elif env == 'VLAN':
-			print("Setting up VLAN environment using Ansible")
-			HOSTS_IP = setupVLANEnvironment(configFile, mode)
-			print(HOSTS_IP)
-		# exit()
+                logger.basicConfig(filename=logFile, level=logger.DEBUG,
+                                   format='%(asctime)s - %(levelname)s - %(message)s')
+                logger.debug("Creating enviornment in :{}".format(env))
+                cfg = {}
+                with open(configFile, "r") as f:
+                    cfg = json.load(f)
+                DB_HOST = cfg['database']['ip']
+                DB_PORT = cfg['database']['port']
+                DB_NAME = 'COSCO'
 
-	datacenter, workload, scheduler, env, stats = initalizeEnvironment(env, logger)
+                if env == 'Vagrant':
+                    print("Setting up VirtualBox environment using Vagrant")
+                    HOSTS_IP = setupVagrantEnvironment(configFile, mode)
+                    print(HOSTS_IP)
+                elif env == 'VLAN':
+                    print("Setting up VLAN environment using Ansible")
+                    HOSTS_IP = setupVLANEnvironment(configFile, mode)
+                    print(HOSTS_IP)
+                # exit()
 
-	for step in range(NUM_SIM_STEPS):
-		print(color.BOLD+"Simulation Interval:", step, color.ENDC)
-		stepSimulation(workload, scheduler, env, stats)
-		if env != '' and step % 10 == 0: saveStats(stats, datacenter, workload, env, end = False)
+            datacenter, workload, scheduler, env, stats = initalizeEnvironment(env, logger, sch)
 
-	if opts.env != '':
-		# Destroy environment if required
-		eval('destroy'+opts.env+'Environment(configFile, mode)')
+            for step in range(NUM_SIM_STEPS):
+                print(color.BOLD+"Simulation Interval:", step, color.ENDC)
+                stepSimulation(workload, scheduler, env, stats)
+                #if env != '' and step % 10 == 0: saveStats(stats, datacenter, workload, env, end = False)
+    
+    
+            if opts.env != '':
+                # Destroy environment if required
+                eval('destroy'+opts.env+'Environment(configFile, mode)')
 
-		# Quit InfluxDB
-		if 'Windows' in platform.system():
-			os.system('taskkill /f /im influxd.exe')
+                # Quit InfluxDB
+                if 'Windows' in platform.system():
+                    os.system('taskkill /f /im influxd.exe')
 
-	saveStats(stats, datacenter, workload, env)
-
+            #saveStats(stats, datacenter, workload, env)
+            try: all_p[sch]
+            except: all_p[sch] = []
+            all_p[sch].append(performance_parameter)
+            save_path=result_path+sch+'/'
+            if not os.path.exists(save_path): 
+                os.makedirs(save_path)
+            with open(save_path+str(i+1)+'.pickle', 'wb') as file:
+                pickle.dump(performance_parameter, file)
+            performance_parameter={'responsetime':[], 'migrationtime':[], 
+                                   'slaviolations':0, 'waittime':[], 'energy':[],
+                                   'num_container':0}
