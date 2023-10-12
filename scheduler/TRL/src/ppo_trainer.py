@@ -125,8 +125,8 @@ class PPOTRainer ():
                 act_dist = Categorical(generate)
                 
                 new_log_probs = act_dist.log_prob(batchActs.squeeze().to(self.actor_model.device))
+
                 newVal = self.critic_model(batchObs).squeeze()
-                
                 prob_ratio = new_log_probs.exp() / batchProbs.exp()
                 weighted_probs = batchAdvs * prob_ratio
 
@@ -135,6 +135,7 @@ class PPOTRainer ():
 
                 actor_loss = -torch.min(weighted_probs, weighted_clipped_probs).mean()
                 returns = batchAdvs + batchVals
+
                 critic_loss = (returns-newVal)**2
                 critic_loss = torch.mean(critic_loss)
 

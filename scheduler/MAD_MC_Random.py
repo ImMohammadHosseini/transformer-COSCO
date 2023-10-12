@@ -4,7 +4,7 @@ from copy import deepcopy
 
 
 class MADMCRScheduler(Scheduler):
-    def __init__(self):
+    def __init__(self, data_type):
         super().__init__()
         self.utilHistory = []
         self.utilHistoryContainer= []

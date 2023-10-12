@@ -3,7 +3,7 @@ import numpy as np
 from copy import deepcopy
 
 class LRMMTRScheduler(Scheduler):
-	def __init__(self):
+	def __init__(self, data_type):
 		super().__init__()
 		self.utilHistory = []
 
