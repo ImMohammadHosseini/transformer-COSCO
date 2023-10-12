@@ -50,7 +50,7 @@ class BWGD2(Workload):
         workloadlist = []
         for i in range(max(1,int(gauss(self.mean, self.sigma)))):
             CreationID = self.creation_id
-            index = self.possible_indices[randint(self.start_data_point, len(self.possible_indices)-1)]
+            index = self.possible_indices[randint(0, len(self.possible_indices)-1)]
             df = pd.read_csv(self.dataset_path+'rnd/'+str(index)+'.csv', sep=';\t')
             sla = gauss(self.meanSLA, self.sigmaSLA)
             IPSModel = IPSMBitbrain((ips_multiplier*df['CPU usage [MHZ]']).to_list(), (ips_multiplier*df['CPU capacity provisioned [MHZ]']).to_list()[0], int(1.2*sla), interval + sla)
