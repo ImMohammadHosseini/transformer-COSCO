@@ -238,6 +238,7 @@ class EncoderScheduler (nn.Module):
         decisions = []
         filter_decision = np.zeros((0,2), dtype=int)
         rewards = {}
+
         for s in range(0, self.decoder_max_length-1):
             next_generate = self.forward(encoder_in)#.cpu()
             next_dist = Categorical(next_generate)
@@ -248,37 +249,44 @@ class EncoderScheduler (nn.Module):
             log_probs.append(next_prob)
             # actions = np.append(actions, next_decision, 0)
             actions.append(next_decision.squeeze().cpu().detach().tolist())
-            encoder_inputs.append(encoder_in.cpu().detach())
+            encoder_inputs.append(deepcopy(encoder_in.cpu().detach()))
             #if next_decision == self.prob_len-1:
                 # TODO
                 # reward.append(0)
             #    break
             cont_dec = int(next_decision / self.host_num)
             host_dec = int(next_decision % self.host_num)
-            decisions.append((cont_dec, host_dec))
+            decisions.append([cont_dec, host_dec])
 
             #if prev_alloc[cont_dec] != new_host: decision.append((cid, new_host))
-
-            if env.containerlist[cont_dec] and cont_dec not in filter_decision[:,0]:
+            try: rewards[cont_dec, host_dec]
+            except: rewards[cont_dec, host_dec] = []
+            
+            cont_exist = None if cont_dec >= env.containerlimit else env.containerlist[cont_dec]
+            if cont_exist and cont_dec not in filter_decision[:,0]:
                 if env.getContainerByID(cont_dec).getHostID() != host_dec and env.getPlacementPossible(cont_dec, host_dec):
                     filter_decision = np.append(filter_decision,[[cont_dec, host_dec]], 0)
                     with torch.no_grad():
-                        encoder_in[:,cont_dec] = pad#torch.cat([pad, torch.cat([encoder_in[:, 0:cont_dec],
+                        encoder_in[:,cont_dec+1] = pad#torch.cat([pad, torch.cat([encoder_in[:, 0:cont_dec],
                                                      #encoder_in[:, cont_dec+1:]], 1)], 1)
                         host = env.getHostByID(host_dec)
                         container = env.getContainerByID(cont_dec)
-                        baseIps = host.getBaseIPS()+container.getBaseIPS()
+                        hostBaseIps = host.getBaseIPS()+container.getBaseIPS()
+                        hostApparentIPS = int(host.getApparentIPS()+container.getApparentIPS())
                         encoder_in[:, -(self.host_num-host_dec+1)] = torch.tensor(
-                            [host.ipsCap/16111, (host.ipsCap-baseIps)/16111, host.latency])
+                            [hostApparentIPS/16111, (host.ipsCap-hostBaseIps)/16111, host.latency])
                         if container.getHostID() != -1:
-                            old_hid = container.getHostID()
-                            old_host = env.getHostByID(old_hid)
-                            encoder_in[:, -(self.host_num-old_hid+1)] = torch.tensor(
-                                [host.ipsCap/16111, (host.ipsCap+baseIps)/16111, host.latency])
-                else: rewards[cont_dec, host_dec] = 0
-            else: rewards[cont_dec, host_dec] = 0
-
-        return decisions, filter_decision, rewards, actions, log_probs, encoder_inputs, None, None
+                            oldHostId = container.getHostID()
+                            oldHost = env.getHostByID(oldHostId)
+                            oldHostBaseIps = oldHost.getBaseIPS()-container.getBaseIPS()
+                            oldHostApparentIPS = int(oldHost.getApparentIPS()-container.getApparentIPS())
+                            encoder_in[:, -(self.host_num-oldHostId+1)] = torch.tensor(
+                                [oldHostApparentIPS/16111, (host.ipsCap-oldHostBaseIps)/16111, host.latency])
+                    
+                else: rewards[cont_dec, host_dec].append(-.01)
+            else: rewards[cont_dec, host_dec].append(-.05)
+            
+        return decisions, filter_decision.tolist(), rewards, actions, log_probs, encoder_inputs, None, None
 
     def forward(
         self,
