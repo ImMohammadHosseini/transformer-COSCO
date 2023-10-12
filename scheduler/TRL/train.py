@@ -29,55 +29,65 @@ def ppo_train(workload, scheduler, datacenter, train_step):
         trainer.reset()
         trainer.save_mid_step (encoder_inputs, decisions, filter_decision, rewards,
                                actions, log_probs, steps, decoder_inputs)
-    
+
         migrations, rewards = scheduler.env.allocateInit(filter_decision) # Schedule containers
+        #print('rewards', rewards)
+        trainer.save_final_step(rewards)
+        #print(trainer.dd)
+
         workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) # Update workload allocated using creation IDs
-    
-        best_reward = -1e4
-        ep_reward = sum(rewards.values()); ep_avgresponsetime=[]; ep_totalenergy=0; num_container=0
-        n_steps = len(rewards)
+        best_responsetime = 1e9
+        ep_reward = sum(r for pr in rewards.values() for r in pr) 
+        ep_avgresponsetime=[]; ep_totalenergy=0; num_container=0
+        #print(rewards)
+        n_steps = sum(len(pr) for pr in rewards.values())
         
         for ep in range(episod_step):
+            
             #print(scheduler.env.getNumActiveContainers())
             newcontainerinfos = workload.generateNewContainers(scheduler.env.interval) 
             deployed, destroyed = scheduler.env.addContainers(newcontainerinfos)
             decisions, filter_decision, rewards, actions, log_probs, mainInfo, \
                 encoder_inputs, steps, decoder_inputs = scheduler.run_transformer()
-            n_steps += len(rewards)
-            ep_reward += sum(rewards.values())
+            n_steps += sum(len(pr) for pr in rewards.values())
+            
+            #print(rewards)
+            ep_reward += sum(r for pr in rewards.values() for r in pr) 
             #filter_decisions = scheduler.filter_placement(decisions)
             trainer.save_mid_step (encoder_inputs, decisions, filter_decision, 
                                    rewards, actions, log_probs, steps, decoder_inputs)
         
-            #print(filter_decision)
-            #print(decisions)
-        
             migrations, rewards = scheduler.env.simulationStep(filter_decision)
-            ep_reward += sum(rewards.values())
-            n_steps += len(rewards)
+            #print(rewards)
+            #print(trainer.dd)
+
+            ep_reward += sum(r for pr in rewards.values() for r in pr) 
             ep_avgresponsetime += [c.totalExecTime + c.totalMigrationTime for c in destroyed] if len(destroyed) > 0 else []
+            num_container +=len(destroyed)
             ep_totalenergy += np.sum([host.getPower()*scheduler.env.intervaltime for host in scheduler.env.hostlist])
             
             workload.updateDeployedContainers(scheduler.env.getCreationIDs(migrations, deployed)) 
             
+            n_steps += sum(len(pr) for pr in rewards.values())
             trainer.save_final_step(rewards)
             if n_steps >= batch_size:
                 n_steps = trainer.train_minibatch(batch_size)
         
-        num_container = workload.creation_id - scheduler.env.getNumActiveContainers()
+        #num_container = workload.creation_id - scheduler.env.getNumActiveContainers()
+        
         num_container_history.append(num_container)
         reward_history.append(ep_reward)
         ep_avgresponsetime = np.average(ep_avgresponsetime)
         avgresponsetime_history.append(ep_avgresponsetime)
         energytotal_history.append(ep_totalenergy)
         
-        avg_reward = np.mean(reward_history[-50:])
-        if avg_reward > best_reward:
-                best_reward  = avg_reward
+        avg_responsetime= np.mean(avgresponsetime_history[-50:])
+        if avg_responsetime < best_responsetime:
+                best_responsetime  = avg_responsetime
                 save_model(scheduler.save_path, trainer.actor_model, trainer.actor_optimizer)
                 save_model(scheduler.save_path, trainer.critic_model, trainer.critic_optimizer)
         
-        print('episod_reward %.3f' % ep_reward, 'avg_reward %.3f' % avg_reward,
+        print('episod_reward %.3f' % ep_reward, 'avg_reward %.3f' % np.mean(reward_history[-50:]),
               'episod_container', num_container, 'avg_container %.3f' % np.mean(num_container_history[-50:]),
               'episod_avgresponsetime %.3f'%ep_avgresponsetime, 
               '50episod_avgresponsetime %.3f'% np.mean(avgresponsetime_history[-50:]), 
