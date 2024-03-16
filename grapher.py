@@ -25,6 +25,7 @@ from sys import argv
 plt.style.use(['science', 'ieee'])
 plt.rcParams["text.usetex"] = True
 size = (2.9, 2.5)
+print(argv)
 env = argv[1]
 option = 0
 sla_baseline = 'A3C'
